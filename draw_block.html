@@ -1,1 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>らくがきブロック</title>
+<script src="three.js"></script>
+<script>
+let scene, camera, renderer;                //シーン、カメラ、レンダラー
+let width, height;                          //幅、高さ
+let h = 5, angle = 0;                       //カメラの高さ、角度
+let blocks = new Array();                   //ブロック
+let disc, cnt = 0;                          //床（円盤）、カウンタ
 
+const init = () => {
+    //画面サイズを取得（幅と高さを補正）
+    width = window.innerWidth - 20;
+    height = window.innerHeight - 150;
+    //シーン
+    scene = new THREE.Scene();
+    //カメラ（画角：５０，ニアクリップ：１，ファークリップ：１００）
+    camera = new THREE.PerspectiveCamera(50, width/height, 1, 100);
+    camera.position.set(15 * Math.cos(angle), h, 15 * Math.sin(angle)); //カメラの初期値をセット　高さｈ、角度angle
+    camera.lookAt(scene.position);                                      //カメラは原点を向く
+    //レンダラー
+    renderer = new THREE.WebGLRenderer({
+        antialias:true,
+        preserveDrawingBuffer:true                                      //キャンバスの保存を有効にする
+    });
+    renderer.setSize(width, height);
+    renderer.shadowMap.enabled = true;
+    document.getElementById("renderArea").appendChild(renderer.domElement); //描画エリアに作成
+    //ライト（平行光源、環境光）
+    const light = new THREE.DirectionalLight("#FFFFFF");                    //白色の平行光源
+    light.position.set(10, 30, 10);
+    light.castShadow = true;                                                //影を落とす
+    light.shadow.camera.top = 20;                                           //影の描画範囲を広くする
+    light.shadow.camera.bottom = -20;
+    light.shadow.camera.left = -20;
+    light.shadow.camera.right = 20;
+    light.shadow.mapSize.width= 2048;                                       //影の描画を細かくする
+    light.shadow.mapSize.height = 2048;
+    scene.add(light);
+    const ambientLight = new THREE.AmbientLight("#999999");                 //グレーの環境光
+    scene.add(ambientLight);
+    //床(円盤）
+    const geometry = new THREE.CylinderGeometry(10, 10, 1, 64);             //床は半径10、厚さ１の円柱
+    const material = new THREE.MeshLambertMaterial({color: "#CCCCCC"});     //床の色は薄いグレー
+    disc = new THREE.Mesh(geometry, material);
+    disc.name = "disc";
+    disc.position.set(0, -1, 0);                                             //床の位置（ｘ、ｙ、ｚ）＝（０，ー１，０）
+    disc.receiveShadow = true;                                              //床は影を受ける
+    scene.add(disc);
+    //キー、マウスイベントの登録
+    document.addEventListener("keydown", moveCamera);
+    renderer.domElement.addEventListener("click", setBlock);
+    renderer.domElement.addEventListener("contextmenu", removeBlock);
+    //描画
+    renderer.render(scene, camera);                                         //画面を描画
+}
+
+const setBlock = event => {
+    //左クリック（ブロックを追加）
+    const object = getIntersectObject(event);                               //クリックした位置に物体があるか探す
+    if ((object.name.indexOf("block") > -1) || (object.name == "disc")) {   //ブロックまたは床があったとき
+       const color = document.getElementById("color").value;                //ブロックの色を取得
+       const box = new THREE.BoxGeometry(1, 1, 1);                          //ブロックは１×１×１の立方体
+       const mat = new THREE.MeshLambertMaterial({color: color});
+       const block = new THREE.Mesh(box, mat);
+       block.name = `block_${cnt}`;
+       block.position.set(object.x, object.y, object.z);                    //ブロックの位置
+       block.castShadow = true;                                             //ブロックは影を落とし、影を受ける
+       block.receiveShadow = true;
+       scene.add(block);
+       blocks[cnt] = block;
+       cnt++;   
+    }
+    renderer.render(scene, camera);
+}
+
+const removeBlock = event => {
+    //右クリック（ブロックを削除）
+    event.preventDefault();                                                 //右クリックのデフォルト動作をキャンセル
+    const object = getIntersectObject(event);
+    if(object.name.indexOf("block") > -1) {                                 //ブロックがあったら削除する
+        deleteBlock(object.name.split("_")[1]);
+    }
+    renderer.render(scene, camera);
+}
+
+const deleteBlock = id => {
+    //ブロックを削除
+    scene.remove(blocks[id]);
+    blocks[id].material.dispose();
+    blocks[id].geometry.dispose();
+    delete blocks[id];
+}
+
+const getIntersectObject = event => {
+    //レイキャストの作成
+    const mouse = new THREE.Vector2();
+    const rect = event.target.getBoundingClientRect();                   //マウスカーソルの位置を3D座標の2次元ベクトルに変換
+    mouse.x = (event.clientX - rect.left) / width * 2 -1;
+    mouse.y = (event.clientY - rect.top) / height * (-2) + 1;
+    const raycaster = new THREE.Raycaster();                            //カメラからマウス位置に向かう透明な線（レイキャスト）を作成
+    raycaster.setFromCamera(mouse, camera);
+    //先頭のオブジェクト名、手前の位置を返す
+    const dir = raycaster.ray.direction;
+    const intersectObject = raycaster.intersectObjects(scene.children)[0];      //レイキャストと交差する最初のオブジェクト
+    let name = "none", x, y, z;
+    if (intersectObject != undefined) {
+        name = intersectObject.object.name;
+        x = Math.round(intersectObject.point.x - dir.x);                        //交差するオブジェクトの手前の座標
+        y = Math.round(intersectObject.point.y - dir.y);
+        z = Math.round(intersectObject.point.z - dir.z);
+    }
+    return {"name":name, "x":x, "y":y, "z":z}
+}
+
+const setColor = () => {
+    //背景色、床の色を変更
+    renderer.setClearColor(document.getElementById("bColor").value);            //背景色をセット
+    disc.material.color.set(document.getElementById("dColor").value);           //床の色をセット
+    renderer.render(scene, camera);
+}
+
+const showDisc = () => {
+    //床の表示／非表示
+    disc.visible = document.getElementById("disc").checked;                     //「床を表示」チェックボックスの状態によって床を表示または非表示に
+    renderer.render(scene, camera);
+}
+
+const moveCamera = event => {
+    //方向キーが押された（カメラの位置を変更）
+    if (event.key == "ArrowUp") h += 0.5;                                       //上下キーでカメラを0.5ずつ上げ下げする
+    if (event.key == "ArrowDown") h -= 0.5;
+    if (event.key == "ArrowLeft") angle += 10 * Math.PI / 180;                  //左右キーでカメラを10度ずつ回転
+    if (event.key == "ArrowRight") angle -= 10 * Math.PI / 180;
+    camera.position.set(15 * Math.cos(angle), h, 15 * Math.sin(angle));         //新しいカメラ位置をセット
+    camera.lookAt(scene.position);
+    renderer.render(scene, camera);
+}
+
+const clearBlocks = () => {
+    //ブロックをすべて削除
+    for (let i=0; i<cnt; i++) {
+        if(blocks[i] != undefined) deleteBlock(i);
+    }
+    blocks = [];
+    cnt = 0;
+    renderer.render(scene, camera);
+}
+
+const saveImage = () => {
+    //画像の保存（ダウンロード）
+    const fname = window.prompt("ファイル名を入力して下さい", "image.png");     //デフォルトのファイル名
+    if (fname != null) {
+        const a = document.createElement
+        a.href = renderer.domElement.toDataURL("image/png");
+        a.download = fname;
+        document.body.appendChild(a);
+        a.click();                                                              //強制クリック
+        document.body.removeChild(a);
+    }
+}
+</script>
+</head>
+<body onload="init()">
+<p>らくがきブロック</p>
+<input type="button" id="start" value="クリア" onclick="clearBlocks()">
+<input type="button" value="キャプチャ" onclick="saveImage()">
+ブロックの色：<input type="color" id="color" value="#FF0000">
+背景色：<input type="color" id="bColor" onchange="setColor()">
+床の色：<input type="color" id="dColor" value="#CCCCCC" onchange="setColor()"> 
+<input type="checkbox" id="disc" checked onchange="showDisc()">床を表示
+<hr>
+<div id="renderArea"></div>
+[←][右]：カメラの回転　[↑][↓]：カメラの高さ移動
+</body>
+</html>
